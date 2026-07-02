@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    NDrop — colors.xml
+    XML-level color tokens used by themes.xml, splash screen, and adaptive icon.
+    The Compose design system (NDropColors) is the source of truth for in-app UI —
+    this file only covers what Android's native theme system needs.
+    Signature: Olii-8882
+-->
+<resources>
+    <color name="splash_background">#0A0E1A</color>
+    <color name="ic_launcher_background">#0A0E1A</color>
+</resources>

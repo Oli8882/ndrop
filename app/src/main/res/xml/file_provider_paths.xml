@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    NDrop — FileProvider Paths
+    Used by ExportHelper (GPX) and DropCardGenerator (PNG).
+    Signature: Olii-8882
+-->
+<paths>
+    <cache-path name="ndrop_cache" path="." />
+</paths>
