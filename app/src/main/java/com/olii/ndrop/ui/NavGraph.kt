@@ -35,7 +35,8 @@ object Routes {
 fun NDropNavGraph(
     navController: NavHostController = rememberNavController(),
     homeViewModel: HomeViewModel = hiltViewModel(),
-    isDarkTheme: Boolean = true
+    isDarkTheme: Boolean = true,
+    onRequestLocationPermission: () -> Unit = {}
 ) {
     LaunchedEffect(Unit) {
         homeViewModel.navigateToTimer.collect {
@@ -47,11 +48,12 @@ fun NDropNavGraph(
 
         composable(Routes.HOME) {
             HomeScreen(
-                onNavigateToDiscovery  = { navController.navigate(Routes.DISCOVERY) },
-                onNavigateToSettings   = { navController.navigate(Routes.SETTINGS) },
-                onNavigateToTimer      = { navController.navigate(Routes.TIMER) },
-                onNavigateToArCompass  = { navController.navigate(Routes.AR_COMPASS) },
-                viewModel              = homeViewModel
+                onNavigateToDiscovery       = { navController.navigate(Routes.DISCOVERY) },
+                onNavigateToSettings        = { navController.navigate(Routes.SETTINGS) },
+                onNavigateToTimer           = { navController.navigate(Routes.TIMER) },
+                onNavigateToArCompass       = { navController.navigate(Routes.AR_COMPASS) },
+                onRequestLocationPermission = onRequestLocationPermission,
+                viewModel                   = homeViewModel
             )
         }
 
@@ -62,6 +64,7 @@ fun NDropNavGraph(
                     val uri = Uri.parse("geo:$lat,$lng?q=$lat,$lng($title)")
                     navController.context.startActivity(Intent(Intent.ACTION_VIEW, uri))
                 },
+                onLeaveAsTreasure = homeViewModel::startWritingTreasure,
                 isDarkTheme = isDarkTheme
             )
         }
@@ -82,7 +85,7 @@ fun NDropNavGraph(
         }
 
         composable(Routes.AR_COMPASS) {
-            ArCompassScreen(onBack = { navController.popBackStack() })
+            ArCompassScreen(onBack = { navController.popBackStack() }, viewModel = homeViewModel)
         }
 
         composable(Routes.ABOUT) {

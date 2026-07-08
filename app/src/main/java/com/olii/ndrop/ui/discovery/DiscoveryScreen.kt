@@ -41,6 +41,7 @@ import java.util.*
 fun DiscoveryScreen(
     onBack: () -> Unit,
     onOpenInMaps: (lat: Double, lng: Double, title: String) -> Unit,
+    onLeaveAsTreasure: (Drop) -> Unit,
     isDarkTheme: Boolean = true,
     viewModel: DiscoveryViewModel = hiltViewModel()
 ) {
@@ -129,7 +130,8 @@ fun DiscoveryScreen(
                         card = card, textPrim = textPrim, textSec = textSec, textDim = textDim, divider = divider,
                         onOpenInMaps = { onOpenInMaps(drop.latitude, drop.longitude, drop.title) },
                         onEdit = { editingDrop = drop },
-                        onDelete = { viewModel.deleteDrop(drop) }
+                        onDelete = { viewModel.deleteDrop(drop) },
+                        onLeaveAsTreasure = { onLeaveAsTreasure(drop) }
                     )
                 }
             }
@@ -157,7 +159,8 @@ private fun DropCard(
     card: Color, textPrim: Color, textSec: Color, textDim: Color, divider: Color,
     onOpenInMaps: () -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onLeaveAsTreasure: () -> Unit
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -229,6 +232,14 @@ private fun DropCard(
                 bg   = NDropColors.AmberDim,
                 contentDescription = "Share as card",
                 onClick = { DropCardGenerator.shareDropCard(context, drop) }
+            )
+            // Treasure Trail: write this drop to a physical tag for someone else to find
+            MiniIconButton(
+                icon = Icons.Rounded.Nfc,
+                tint = NDropColors.Mint,
+                bg   = NDropColors.MintDim,
+                contentDescription = "Leave as treasure",
+                onClick = onLeaveAsTreasure
             )
             MiniIconButton(
                 icon = Icons.Rounded.Edit,

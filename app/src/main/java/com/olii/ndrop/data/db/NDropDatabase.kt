@@ -17,7 +17,7 @@ class TagTypeConverter {
 
 @Database(
     entities = [Drop::class, ParkingSpot::class, RegisteredTag::class, Streak::class, ScanPattern::class],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 @TypeConverters(TagTypeConverter::class)

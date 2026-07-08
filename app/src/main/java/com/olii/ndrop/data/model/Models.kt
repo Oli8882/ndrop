@@ -68,5 +68,7 @@ data class Streak(
 data class ScanPattern(
     @PrimaryKey val uid: String,        // Tag UID
     val avgHourOfDay: Float = 0f,       // Average hour tag is scanned
-    val scanDates: String = ""          // CSV of epoch days
+    val scanDates: String = "",         // CSV of epoch days (capped to last 30, for display)
+    val totalScans: Int = 0             // True lifetime scan count — weights avgHourOfDay
+                                         // correctly even after scanDates is capped
 )

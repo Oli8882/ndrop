@@ -19,8 +19,6 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        // MapLibre Compose (rallista) is published to Maven Central
-        maven { url = uri("https://jitpack.io") }
     }
 }
 

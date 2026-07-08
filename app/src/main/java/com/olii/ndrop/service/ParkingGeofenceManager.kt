@@ -40,6 +40,10 @@ class ParkingGeofenceManager @Inject constructor(
     private var lastNotifiedAt = 0L
     private var monitoringJob: Job? = null
 
+    // Reused across every location callback instead of spinning up a new
+    // scope per update — this manager is a singleton for the app's lifetime.
+    private val proximityScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(result: LocationResult) {
             val current = result.lastLocation ?: return
@@ -77,8 +81,7 @@ class ParkingGeofenceManager @Inject constructor(
     }
 
     private fun checkProximity(current: Location) {
-        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-        scope.launch {
+        proximityScope.launch {
             val spot = repository.getParkingSpotOnce() ?: return@launch
 
             val spotLocation = Location("parking").apply {

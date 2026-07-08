@@ -4,6 +4,7 @@ import android.location.Location
 import com.olii.ndrop.data.db.*
 import com.olii.ndrop.data.model.*
 import com.olii.ndrop.nfc.TagType
+import com.olii.ndrop.nfc.TreasureCodec
 import kotlinx.coroutines.flow.Flow
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -45,6 +46,11 @@ class DropRepository @Inject constructor(
     suspend fun getParkingSpotOnce(): ParkingSpot? = parkingDao.getParkingSpotOnce()
     suspend fun getParkingSpotByTag(uid: String): ParkingSpot? = parkingDao.getParkingSpotByTag(uid)
 
+    // Feature 12: id for a brand-new car — reuses the tag's existing spot id if this
+    // tag has parked before, otherwise allocates the next free id.
+    suspend fun resolveCarId(tagUid: String): Int =
+        parkingDao.getParkingSpotByTag(tagUid)?.id ?: ((parkingDao.getMaxParkingId() ?: 0) + 1)
+
     // ── Discovery Drops ───────────────────────────────────────────────────────
 
     val allDrops: Flow<List<Drop>> = dropDao.getAllDrops()
@@ -72,6 +78,22 @@ class DropRepository @Inject constructor(
 
     suspend fun updateDrop(drop: Drop) = dropDao.updateDrop(drop)
     suspend fun deleteDrop(drop: Drop) = dropDao.deleteDrop(drop)
+
+    // Treasure Trail: save a Discovery someone else seeded onto a physical tag.
+    // Keeps their title/emoji intact rather than auto-numbering it like a
+    // fresh scan would — it's their discovery, we're just adopting the pin.
+    suspend fun addFoundDrop(found: TreasureCodec.FoundTreasure): Drop {
+        val drop = Drop(
+            latitude = found.latitude,
+            longitude = found.longitude,
+            title = found.title,
+            collectionName = "Found Treasures",
+            emoji = found.emoji
+        )
+        val id = dropDao.insertDrop(drop)
+        updateStreak()
+        return drop.copy(id = id)
+    }
 
     // Feature 6: Nearby drops within ~500m radius
     suspend fun getDropsNearby(lat: Double, lng: Double, radiusMeters: Double = 500.0): List<Drop> {
@@ -132,14 +154,16 @@ class DropRepository @Inject constructor(
         val existing = scanPatternDao.getPattern(uid)
 
         val updated = if (existing == null) {
-            ScanPattern(uid = uid, avgHourOfDay = hour, scanDates = today)
+            ScanPattern(uid = uid, avgHourOfDay = hour, scanDates = today, totalScans = 1)
         } else {
-            // Rolling average of hour
-            val scans = existing.scanDates.split(",").size.toFloat()
+            // Rolling average weighted by the true lifetime scan count — not the
+            // capped scanDates list size, which would plateau the weight at 30
+            // forever and skew the average once a tag has more history than that.
+            val scans = existing.totalScans.toFloat()
             val newAvg = ((existing.avgHourOfDay * scans) + hour) / (scans + 1)
             val dates = (existing.scanDates.split(",") + today)
-                .takeLast(30).joinToString(",")  // Keep last 30 days
-            existing.copy(avgHourOfDay = newAvg, scanDates = dates)
+                .takeLast(30).joinToString(",")  // Keep last 30 days (for display only)
+            existing.copy(avgHourOfDay = newAvg, scanDates = dates, totalScans = existing.totalScans + 1)
         }
         scanPatternDao.upsertPattern(updated)
     }

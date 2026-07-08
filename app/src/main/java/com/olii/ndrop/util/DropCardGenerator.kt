@@ -30,6 +30,13 @@ import java.util.*
 object DropCardGenerator {
 
     fun shareDropCard(context: Context, drop: Drop) {
+        // Clear cards from previous shares so cacheDir doesn't accumulate one
+        // file per share forever. Keeps a distinct filename per drop (rather
+        // than one fixed name) so an in-flight share of this card isn't
+        // clobbered if another share starts before the first is consumed.
+        context.cacheDir.listFiles { f -> f.name.startsWith("ndrop_card_") }
+            ?.forEach { it.delete() }
+
         val bitmap = generateCard(drop)
 
         val file = File(context.cacheDir, "ndrop_card_${drop.id}.png")

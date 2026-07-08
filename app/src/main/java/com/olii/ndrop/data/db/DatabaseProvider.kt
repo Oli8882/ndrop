@@ -8,7 +8,8 @@ import androidx.room.Room
  *
  * A plain Kotlin singleton that holds the single Room instance.
  * Used by components that can't use Hilt injection — specifically
- * the ParkingWidget (GlanceAppWidget) and any BroadcastReceivers.
+ * the ParkingWidget (a plain AppWidgetProvider/RemoteViews) and any
+ * BroadcastReceivers.
  *
  * Hilt's AppModule calls getInstance() too, so both paths share
  * the exact same database object — no double-open, no WAL conflicts.
@@ -27,7 +28,7 @@ object DatabaseProvider {
                 NDropDatabase::class.java,
                 "ndrop.db"
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .fallbackToDestructiveMigration()
                 .build()
                 .also { instance = it }
@@ -61,6 +62,25 @@ object DatabaseProvider {
                     avgHourOfDay REAL NOT NULL DEFAULT 0,
                     scanDates TEXT NOT NULL DEFAULT ''
                 )
+            """)
+        }
+    }
+
+    // Migration: v2 → v3
+    // Adds a true lifetime scan counter so the rolling-average weighting in
+    // DropRepository.recordScanPattern() stays correct after scanDates is
+    // capped to the last 30 days (previously it re-derived the weight from
+    // scanDates.size, which silently plateaued at 30 forever).
+    private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+        override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+            database.execSQL("ALTER TABLE scan_patterns ADD COLUMN totalScans INTEGER NOT NULL DEFAULT 0")
+            // Backfill from the existing (possibly already-capped) date list so
+            // existing patterns don't see a sudden jump in average sensitivity.
+            database.execSQL("""
+                UPDATE scan_patterns SET totalScans =
+                    CASE WHEN scanDates = '' THEN 0
+                         ELSE (LENGTH(scanDates) - LENGTH(REPLACE(scanDates, ',', '')) + 1)
+                    END
             """)
         }
     }

@@ -31,9 +31,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.olii.ndrop.ui.theme.NDropColors
 import com.olii.ndrop.ui.theme.NDropTypography
+import com.olii.ndrop.util.toTimerDisplay
 import com.olii.ndrop.viewmodel.TimerViewModel
 import com.olii.ndrop.viewmodel.TimerViewModel.TimerState
-import com.olii.ndrop.viewmodel.toTimerDisplay
 
 /**
  * NDrop — TimerScreen

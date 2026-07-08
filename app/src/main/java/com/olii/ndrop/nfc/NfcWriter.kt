@@ -5,16 +5,18 @@ import android.nfc.NdefRecord
 import android.nfc.Tag
 import android.nfc.tech.Ndef
 import android.nfc.tech.NdefFormatable
-import com.olii.ndrop.nfc.TagType
+import com.olii.ndrop.data.model.Drop
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * NDrop — NfcWriter (Feature 10)
+ * NDrop — NfcWriter (Feature 10 + Treasure Trail)
  *
- * Writes an NDEF record to a blank or writable NTag213.
- * The record encodes the tag's intended type (PARKING/DISCOVERY/TIMER)
- * as a plain text NDEF record so the tag self-identifies on any device.
+ * Writes an NDEF text record to a blank or writable NTag213. Two payload
+ * shapes share the same low-level write path:
+ *  - Tag self-identification: "ndrop:TYPE:label" (writeTagInfo)
+ *  - A seeded Discovery for someone else to find: TreasureCodec's format
+ *    (writeDropInfo)
  *
  * ⚠️ NDEF write requires the tag to be held still for ~300ms.
  *    Always wrap write() in a try-catch at the call site.
@@ -36,8 +38,18 @@ class NfcWriter @Inject constructor() {
      * Writes tag type + label to the tag as a plain text NDEF record.
      * Called from the Tag Registration Sheet when user confirms.
      */
-    fun writeTagInfo(tag: Tag, tagType: TagType, label: String): WriteResult {
-        val payload = "ndrop:${tagType.name}:$label"
+    fun writeTagInfo(tag: Tag, tagType: TagType, label: String): WriteResult =
+        writeText(tag, "ndrop:${tagType.name}:$label")
+
+    /**
+     * Writes a Discovery drop's location + identity to the tag so any NDrop
+     * install can read it back and save it — the Treasure Trail feature.
+     * Called when the user chooses "Leave as Treasure" on one of their drops.
+     */
+    fun writeDropInfo(tag: Tag, drop: Drop): WriteResult =
+        writeText(tag, TreasureCodec.encode(drop))
+
+    private fun writeText(tag: Tag, payload: String): WriteResult {
         val record  = NdefRecord.createTextRecord("en", payload)
         val message = NdefMessage(arrayOf(record))
 

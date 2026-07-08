@@ -54,6 +54,7 @@ fun HomeScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToTimer: () -> Unit,
     onNavigateToArCompass: () -> Unit,
+    onRequestLocationPermission: () -> Unit,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val parkingSpot           by viewModel.parkingSpot.collectAsStateWithLifecycle()
@@ -72,15 +73,7 @@ fun HomeScreen(
     // Show permission denied screen instead of map when location is not granted
     if (!hasLocationPermission) {
         LocationDeniedScreen(
-            onRequestPermission = {
-                // Re-trigger permission from the Activity via a shared event
-                // For simplicity, deep-link to settings — user already denied once
-                val intent = android.content.Intent(
-                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    android.net.Uri.fromParts("package", appContext.packageName, null)
-                )
-                appContext.startActivity(intent)
-            }
+            onRequestPermission = onRequestLocationPermission
         )
         return
     }
@@ -92,9 +85,10 @@ fun HomeScreen(
         }
     }
 
-    val defaultLatLng = LatLng(41.0082, 28.9784)
+    // Neutral world view until a real fix (either the user's own location or a
+    // saved parking spot) arrives — no hardcoded city bias.
     val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(defaultLatLng, 14f)
+        position = CameraPosition.fromLatLngZoom(LatLng(0.0, 0.0), 2f)
     }
 
     LaunchedEffect(parkingSpot) {
@@ -104,6 +98,22 @@ fun HomeScreen(
                     LatLng(spot.latitude, spot.longitude), 16f
                 ), durationMs = 800
             )
+        }
+    }
+
+    // No parking spot yet — center the map on the user's actual current location
+    // instead of leaving it on the neutral world view.
+    LaunchedEffect(Unit) {
+        if (parkingSpot == null) {
+            viewModel.getCurrentLocation { location ->
+                scope.launch {
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngZoom(
+                            LatLng(location.latitude, location.longitude), 15f
+                        ), durationMs = 600
+                    )
+                }
+            }
         }
     }
 
@@ -237,7 +247,7 @@ fun HomeScreen(
                                 }
                             },
                             onArCompass = onNavigateToArCompass,
-                            onClear     = viewModel::clearParking
+                            onClear     = { viewModel.clearParking(spot.id) }
                         )
                     }
                 }

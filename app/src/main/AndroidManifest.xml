@@ -12,7 +12,6 @@
     <!-- Location -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <!-- Haptics / Vibration -->
     <uses-permission android:name="android.permission.VIBRATE" />
@@ -20,9 +19,8 @@
     <!-- Notifications (parking proximity alerts) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Foreground service for geofence -->
+    <!-- Foreground service for the countdown timer -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
@@ -85,5 +83,15 @@
         </provider>
 
     </application>
+
+    <!-- API 30+ package visibility: lets resolveActivity() find an installed maps app
+         for geo: links (ShareHelper.openInMaps) instead of silently falling through
+         to the browser fallback. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+    </queries>
 
 </manifest>

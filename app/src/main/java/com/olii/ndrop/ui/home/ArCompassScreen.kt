@@ -30,6 +30,8 @@ import com.olii.ndrop.data.model.ParkingSpot
 import com.olii.ndrop.ui.theme.NDropColors
 import com.olii.ndrop.ui.theme.NDropTypography
 import com.olii.ndrop.viewmodel.HomeViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlin.math.*
 
 /**
@@ -47,12 +49,13 @@ fun ArCompassScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val parkingSpot by viewModel.parkingSpot.collectAsStateWithLifecycle()
+    val liveLocation by viewModel.currentLocation.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // Live device heading from compass sensor
     var deviceHeading by remember { mutableFloatStateOf(0f) }
-    var currentLat by remember { mutableDoubleStateOf(0.0) }
-    var currentLng by remember { mutableDoubleStateOf(0.0) }
+    val currentLat = liveLocation?.latitude ?: 0.0
+    val currentLng = liveLocation?.longitude ?: 0.0
 
     // Register compass sensor
     DisposableEffect(Unit) {
@@ -90,9 +93,13 @@ fun ArCompassScreen(
         }
     }
 
-    // Get current location once
+    // Poll a fresh location fix at a steady cadence while this screen is visible,
+    // so the arrow/distance track the user's actual walk back to the car.
     LaunchedEffect(Unit) {
-        // Pull from last known location in viewmodel
+        while (isActive) {
+            viewModel.refreshLocationForCompass()
+            delay(2_000L)
+        }
     }
 
     val spot = parkingSpot
@@ -123,12 +130,20 @@ fun ArCompassScreen(
 
         Spacer(Modifier.weight(1f))
 
-        if (spot != null) {
-            // Calculate bearing to parking spot
-            // Using current device location — simplified with last known
+        if (spot != null && liveLocation == null) {
+            CircularProgressIndicator(color = NDropColors.Mint)
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Getting your location…",
+                style = NDropTypography.bodyMedium,
+                color = NDropColors.WhiteMuted,
+                textAlign = TextAlign.Center
+            )
+        } else if (spot != null) {
+            // Real bearing/distance from the device's live GPS fix to the parking spot.
             val bearing = calculateBearing(
-                fromLat = currentLat.takeIf { it != 0.0 } ?: spot.latitude + 0.001,
-                fromLng = currentLng.takeIf { it != 0.0 } ?: spot.longitude + 0.001,
+                fromLat = currentLat,
+                fromLng = currentLng,
                 toLat   = spot.latitude,
                 toLng   = spot.longitude
             )
@@ -142,8 +157,8 @@ fun ArCompassScreen(
 
             // Distance
             val distanceM = approximateDistance(
-                lat1 = currentLat.takeIf { it != 0.0 } ?: spot.latitude + 0.001,
-                lng1 = currentLng.takeIf { it != 0.0 } ?: spot.longitude + 0.001,
+                lat1 = currentLat,
+                lng1 = currentLng,
                 lat2 = spot.latitude,
                 lng2 = spot.longitude
             )

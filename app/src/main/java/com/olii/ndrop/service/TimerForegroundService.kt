@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.olii.ndrop.MainActivity
+import com.olii.ndrop.util.toTimerDisplay
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import javax.inject.Inject
@@ -106,7 +107,7 @@ class TimerForegroundService : Service() {
         return NotificationCompat.Builder(this, NotificationHelper.CHANNEL_TIMER)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentTitle("⏱ $label")
-            .setContentText(remainingSeconds.toTimerDisplayLocal())
+            .setContentText(remainingSeconds.toTimerDisplay())
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
@@ -122,13 +123,4 @@ class TimerForegroundService : Service() {
         serviceScope.cancel()
         super.onDestroy()
     }
-}
-
-// Local copy of display formatter — service can't access Compose extension
-private fun Long.toTimerDisplayLocal(): String {
-    val h = this / 3600
-    val m = (this % 3600) / 60
-    val s = this % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, s)
-    else "%02d:%02d".format(m, s)
 }

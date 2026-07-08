@@ -40,18 +40,16 @@ interface DropDao {
 
     @Query("SELECT COUNT(*) FROM drops")
     suspend fun getDropCount(): Int
-
-    @Query("SELECT COUNT(*) FROM drops WHERE timestamp >= :since")
-    suspend fun getDropCountSince(since: Long): Int
 }
 
 @Dao
 interface ParkingDao {
-    // Default car (id=1)
-    @Query("SELECT * FROM parking_spot WHERE id = 1")
+    // Feature 12: multiple cars can exist; the "active" one shown on Home/AR-compass
+    // is whichever was most recently parked.
+    @Query("SELECT * FROM parking_spot ORDER BY timestamp DESC LIMIT 1")
     fun getParkingSpot(): Flow<ParkingSpot?>
 
-    @Query("SELECT * FROM parking_spot WHERE id = 1")
+    @Query("SELECT * FROM parking_spot ORDER BY timestamp DESC LIMIT 1")
     suspend fun getParkingSpotOnce(): ParkingSpot?
 
     // Feature 12: All cars
@@ -60,6 +58,9 @@ interface ParkingDao {
 
     @Query("SELECT * FROM parking_spot WHERE tagUid = :uid LIMIT 1")
     suspend fun getParkingSpotByTag(uid: String): ParkingSpot?
+
+    @Query("SELECT MAX(id) FROM parking_spot")
+    suspend fun getMaxParkingId(): Int?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertParkingSpot(spot: ParkingSpot)

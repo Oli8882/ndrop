@@ -4,6 +4,8 @@ import android.app.Activity
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.IntentFilter
+import android.nfc.NdefMessage
+import android.nfc.NdefRecord
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.NfcA
@@ -39,7 +41,7 @@ class NfcManager @Inject constructor() {
 
     private var nfcAdapter: NfcAdapter? = null
 
-    data class ScanEvent(val uid: String, val rawTag: Tag)
+    data class ScanEvent(val uid: String, val rawTag: Tag, val ndefText: String?)
 
     /**
      * Call from MainActivity.onResume()
@@ -104,8 +106,28 @@ class NfcManager @Inject constructor() {
         }
 
         val uid = tag.id.toHexString()
-        _scanEvents.tryEmit(ScanEvent(uid = uid, rawTag = tag))
+        val ndefText = extractNdefText(intent)
+        _scanEvents.tryEmit(ScanEvent(uid = uid, rawTag = tag, ndefText = ndefText))
         return true
+    }
+
+    /**
+     * Android attaches parsed NDEF messages to the intent itself when a scan is
+     * dispatched via ACTION_NDEF_DISCOVERED — no separate connect()/read needed.
+     * A blank or non-NDEF tag simply won't have this extra (dispatched via one
+     * of the other two actions instead), so this safely returns null for those.
+     */
+    private fun extractNdefText(intent: Intent): String? {
+        val rawMessages = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES, NdefMessage::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES)
+        } ?: return null
+
+        val message = rawMessages.firstOrNull() as? NdefMessage ?: return null
+        val record  = message.records?.firstOrNull() ?: return null
+        return record.toText()
     }
 
     fun isNfcAvailable(activity: Activity): Boolean {
@@ -123,3 +145,20 @@ class NfcManager @Inject constructor() {
  */
 fun ByteArray.toHexString(): String =
     joinToString(":") { "%02X".format(it) }
+
+/**
+ * Decodes a well-known-text NDEF record (the format NfcWriter writes via
+ * NdefRecord.createTextRecord) back into its plain string payload.
+ * Returns null for any other record type.
+ */
+fun NdefRecord.toText(): String? {
+    if (tnf != NdefRecord.TNF_WELL_KNOWN || !type.contentEquals(NdefRecord.RTD_TEXT)) return null
+    val bytes = payload
+    if (bytes.isEmpty()) return null
+    val languageCodeLength = bytes[0].toInt() and 0x3F
+    val isUtf16 = (bytes[0].toInt() and 0x80) != 0
+    val charset = if (isUtf16) Charsets.UTF_16 else Charsets.UTF_8
+    val textStart = 1 + languageCodeLength
+    if (textStart > bytes.size) return null
+    return String(bytes, textStart, bytes.size - textStart, charset)
+}

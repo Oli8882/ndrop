@@ -1,6 +1,8 @@
 package com.olii.ndrop.viewmodel
 
 import android.content.Intent
+import android.location.Location
+import android.nfc.Tag
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -14,7 +16,10 @@ import com.olii.ndrop.data.model.Streak
 import com.olii.ndrop.data.repository.DropRepository
 import com.olii.ndrop.location.LocationManager
 import com.olii.ndrop.nfc.NfcManager
+import com.olii.ndrop.nfc.NfcWriter
 import com.olii.ndrop.nfc.TagType
+import com.olii.ndrop.nfc.TreasureCodec
+import com.olii.ndrop.nfc.toHexString
 import com.olii.ndrop.service.NotificationHelper
 import com.olii.ndrop.service.ParkingGeofenceManager
 import com.olii.ndrop.ui.scan.ScanResult
@@ -32,6 +37,7 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val nfcManager: NfcManager,
+    private val nfcWriter: NfcWriter,
     private val locationManager: LocationManager,
     private val repository: DropRepository,
     private val geofenceManager: ParkingGeofenceManager,
@@ -49,12 +55,27 @@ class HomeViewModel @Inject constructor(
     private val _hasLocationPermission = MutableStateFlow(false)
     val hasLocationPermission: StateFlow<Boolean> = _hasLocationPermission.asStateFlow()
 
+    // Feature 3: live location for the AR "Walk to Car" compass
+    val currentLocation: StateFlow<Location?> = locationManager.lastKnownLocation
+
     // ── Scan UI ───────────────────────────────────────────────────────────────
     private val _activeScanResult = MutableStateFlow<ScanResult?>(null)
     val activeScanResult: StateFlow<ScanResult?> = _activeScanResult.asStateFlow()
 
     private val _pendingUnknownUid = MutableStateFlow<String?>(null)
     val pendingUnknownUid: StateFlow<String?> = _pendingUnknownUid.asStateFlow()
+
+    // Feature 10: the raw Tag from the most recent scan, kept only long enough to
+    // attempt a write-back if the user registers it before pulling the tag away.
+    private var lastScannedTag: Tag? = null
+
+    // Treasure Trail: someone else's seeded Discovery, read off a foreign tag
+    private val _pendingFoundTreasure = MutableStateFlow<TreasureCodec.FoundTreasure?>(null)
+    val pendingFoundTreasure: StateFlow<TreasureCodec.FoundTreasure?> = _pendingFoundTreasure.asStateFlow()
+
+    // Treasure Trail: a drop queued to be written onto the next tag scanned
+    private val _pendingTreasureWrite = MutableStateFlow<Drop?>(null)
+    val pendingTreasureWrite: StateFlow<Drop?> = _pendingTreasureWrite.asStateFlow()
 
     // Feature 1: Pending floor note after parking scan
     private val _showFloorNoteOverlay = MutableStateFlow(false)
@@ -99,7 +120,18 @@ class HomeViewModel @Inject constructor(
     private fun observeNfcScans() {
         viewModelScope.launch {
             nfcManager.scanEvents.collect { event ->
-                handleScan(event.uid)
+                lastScannedTag = event.rawTag
+
+                // Treasure Trail: if a write is queued, this scan is the target
+                // tag to write to, not a normal read — don't also process it as one.
+                val toWrite = _pendingTreasureWrite.value
+                if (toWrite != null) {
+                    _pendingTreasureWrite.value = null
+                    writeTreasureToTag(event.rawTag, toWrite)
+                    return@collect
+                }
+
+                handleScan(event.uid, event.ndefText)
             }
         }
     }
@@ -108,7 +140,7 @@ class HomeViewModel @Inject constructor(
         nfcManager.processIntent(intent)
     }
 
-    private fun handleScan(uid: String) {
+    private fun handleScan(uid: String, ndefText: String? = null) {
         viewModelScope.launch {
             vibrate()
             // Feature 13: increment scan counter
@@ -122,6 +154,17 @@ class HomeViewModel @Inject constructor(
             }
 
             val tagType = repository.resolveTag(uid)
+
+            // Treasure Trail: an unregistered tag carrying a treasure payload
+            // isn't "unknown" — it's someone else's seeded Discovery.
+            if (tagType == TagType.UNKNOWN && ndefText != null) {
+                val found = TreasureCodec.decode(ndefText)
+                if (found != null) {
+                    _pendingFoundTreasure.value = found
+                    return@launch
+                }
+            }
+
             when (tagType) {
                 TagType.PARKING   -> handleParkingScan(uid)
                 TagType.DISCOVERY -> handleDiscoveryScan()
@@ -135,10 +178,13 @@ class HomeViewModel @Inject constructor(
         val location = locationManager.getCurrentLocation()
         if (location == null) { _errorMessage.emit("Couldn't get location. Try again."); return }
 
-        // Check if this tag maps to a specific car
+        // Feature 12: each distinct Parking tag tracks its own car, named after
+        // whatever label the user gave the tag when registering it.
         val existingSpot = repository.getParkingSpotByTag(uid)
-        val carId    = existingSpot?.id ?: 1
-        val carLabel = existingSpot?.carLabel ?: "My Car"
+        val carId    = existingSpot?.id ?: repository.resolveCarId(uid)
+        val carLabel = existingSpot?.carLabel
+            ?: repository.getTagByUid(uid)?.label
+            ?: "My Car"
 
         repository.saveParkingSpot(location.latitude, location.longitude,
             carId = carId, carLabel = carLabel, tagUid = uid)
@@ -181,6 +227,42 @@ class HomeViewModel @Inject constructor(
     fun dismissFloorNote()     { _showFloorNoteOverlay.value = false }
     fun dismissCollectionPick(){ _pendingCollectionDrop.value = null }
 
+    // ── Treasure Trail ────────────────────────────────────────────────────────
+
+    fun dismissFoundTreasure() { _pendingFoundTreasure.value = null }
+
+    fun saveFoundTreasure(found: TreasureCodec.FoundTreasure) {
+        viewModelScope.launch {
+            val drop = repository.addFoundDrop(found)
+            _pendingFoundTreasure.value = null
+            _activeScanResult.value = ScanResult(
+                tagType    = TagType.DISCOVERY,
+                message    = "Treasure Found!",
+                subMessage = drop.title
+            )
+            // Let them re-file it into one of their own collections, same as
+            // any other fresh Discovery scan.
+            _pendingCollectionDrop.value = drop
+            refreshNearbyDrops()
+        }
+    }
+
+    /** Queues [drop] to be written to whatever tag is scanned next. */
+    fun startWritingTreasure(drop: Drop) { _pendingTreasureWrite.value = drop }
+    fun cancelWritingTreasure() { _pendingTreasureWrite.value = null }
+
+    private fun writeTreasureToTag(tag: Tag, drop: Drop) {
+        viewModelScope.launch {
+            vibrate()
+            when (val result = nfcWriter.writeDropInfo(tag, drop)) {
+                is NfcWriter.WriteResult.Success ->
+                    _errorMessage.emit("✨ Treasure written! Go hide it somewhere good.")
+                is NfcWriter.WriteResult.Failure ->
+                    _errorMessage.emit("Couldn't write to tag: ${result.reason}")
+            }
+        }
+    }
+
     // Feature 1: Save floor note
     fun saveFloorNote(note: String) {
         viewModelScope.launch {
@@ -221,12 +303,32 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    /** Feature 3: one location fix for the AR compass; suspends until it resolves so
+     *  callers can poll on a steady cadence without piling up overlapping requests. */
+    suspend fun refreshLocationForCompass() {
+        locationManager.getCurrentLocation()
+    }
+
     // ── Tag Registration ──────────────────────────────────────────────────────
 
     fun registerTag(uid: String, type: TagType, label: String) {
         viewModelScope.launch {
             repository.registerTag(uid, type, label)
             _pendingUnknownUid.value = null
+
+            // Feature 10: best-effort write-back so the tag self-identifies on any
+            // device. Only attempted if it's still the same tag that triggered this
+            // registration — the NFC connection is invalid once the tag is pulled away.
+            val tag = lastScannedTag
+            if (tag != null && tag.id.toHexString() == uid) {
+                when (val result = nfcWriter.writeTagInfo(tag, type, label)) {
+                    is NfcWriter.WriteResult.Success ->
+                        _errorMessage.emit("✍️ Wrote tag info — it'll self-identify on any device")
+                    is NfcWriter.WriteResult.Failure ->
+                        _errorMessage.emit("Tag registered (couldn't write to it: ${result.reason})")
+                }
+            }
+
             handleScan(uid)
         }
     }

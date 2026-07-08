@@ -26,9 +26,11 @@ import com.olii.ndrop.ui.home.NfcStatus
 import com.olii.ndrop.ui.home.NfcUnavailableScreen
 import com.olii.ndrop.ui.onboarding.OnboardingScreen
 import com.olii.ndrop.ui.scan.FloorNoteOverlay
+import com.olii.ndrop.ui.scan.FoundTreasureOverlay
 import com.olii.ndrop.ui.scan.QuickCollectionOverlay
 import com.olii.ndrop.ui.scan.ScanOverlay
 import com.olii.ndrop.ui.scan.TagRegistrationSheet
+import com.olii.ndrop.ui.scan.TreasureWriteOverlay
 import com.olii.ndrop.ui.theme.NDropTheme
 import com.olii.ndrop.viewmodel.HomeViewModel
 import com.olii.ndrop.viewmodel.OnboardingViewModel
@@ -80,10 +82,16 @@ class MainActivity : ComponentActivity() {
 
             NDropTheme(darkTheme = isDarkMode) {
                 NDropRoot(
-                    homeViewModel     = homeViewModel,
-                    settingsViewModel = settingsViewModel,
-                    nfcStatus         = nfcStatus,
-                    isDarkTheme       = isDarkMode
+                    homeViewModel             = homeViewModel,
+                    settingsViewModel         = settingsViewModel,
+                    nfcStatus                 = nfcStatus,
+                    isDarkTheme               = isDarkMode,
+                    onRequestLocationPermission = {
+                        locationPermissionLauncher.launch(
+                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION)
+                        )
+                    }
                 )
             }
         }
@@ -94,6 +102,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         nfcManager.enableForegroundDispatch(this)
+        // Re-check location permission state in case the user granted it from
+        // Settings (via LocationDeniedScreen's deep link) and came back to the app.
+        refreshLocationPermissionState()
     }
 
     override fun onPause() {
@@ -111,16 +122,21 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkAndRequestLocationPermission() {
-        val fine   = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
-        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
-        if (fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED) {
-            homeViewModel.setLocationPermissionGranted(true)
-        } else {
+        refreshLocationPermissionState()
+        if (!homeViewModel.hasLocationPermission.value) {
             locationPermissionLauncher.launch(
                 arrayOf(Manifest.permission.ACCESS_FINE_LOCATION,
                         Manifest.permission.ACCESS_COARSE_LOCATION)
             )
         }
+    }
+
+    private fun refreshLocationPermissionState() {
+        val fine   = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+        val coarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION)
+        homeViewModel.setLocationPermissionGranted(
+            fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED
+        )
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -140,13 +156,16 @@ private fun NDropRoot(
     homeViewModel:     HomeViewModel,
     settingsViewModel: SettingsViewModel,
     nfcStatus:         NfcStatus,
-    isDarkTheme:       Boolean
+    isDarkTheme:       Boolean,
+    onRequestLocationPermission: () -> Unit
 ) {
     val activeScanResult      by homeViewModel.activeScanResult.collectAsStateWithLifecycle()
     val pendingUnknownUid     by homeViewModel.pendingUnknownUid.collectAsStateWithLifecycle()
     val showFloorNoteOverlay  by homeViewModel.showFloorNoteOverlay.collectAsStateWithLifecycle()
     val pendingCollectionDrop by homeViewModel.pendingCollectionDrop.collectAsStateWithLifecycle()
     val collections           by homeViewModel.allCollections.collectAsStateWithLifecycle()
+    val pendingFoundTreasure  by homeViewModel.pendingFoundTreasure.collectAsStateWithLifecycle()
+    val pendingTreasureWrite  by homeViewModel.pendingTreasureWrite.collectAsStateWithLifecycle()
 
     val onboardingViewModel = androidx.hilt.navigation.compose.hiltViewModel<OnboardingViewModel>()
     val showOnboarding      by onboardingViewModel.showOnboarding.collectAsStateWithLifecycle()
@@ -173,8 +192,9 @@ private fun NDropRoot(
 
             else -> {
                 NDropNavGraph(
-                    homeViewModel = homeViewModel,
-                    isDarkTheme   = isDarkTheme
+                    homeViewModel               = homeViewModel,
+                    isDarkTheme                 = isDarkTheme,
+                    onRequestLocationPermission = onRequestLocationPermission
                 )
 
                 AnimatedVisibility(
@@ -207,6 +227,21 @@ private fun NDropRoot(
                         existingCollections = collections,
                         onAssign            = { col -> homeViewModel.assignCollection(col) },
                         onDismiss           = homeViewModel::dismissCollectionPick
+                    )
+                }
+
+                pendingFoundTreasure?.let { found ->
+                    FoundTreasureOverlay(
+                        found     = found,
+                        onSave    = { homeViewModel.saveFoundTreasure(found) },
+                        onDismiss = homeViewModel::dismissFoundTreasure
+                    )
+                }
+
+                pendingTreasureWrite?.let { drop ->
+                    TreasureWriteOverlay(
+                        dropTitle = drop.title,
+                        onCancel  = homeViewModel::cancelWritingTreasure
                     )
                 }
             }

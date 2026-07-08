@@ -51,10 +51,4 @@ class DiscoveryViewModel @Inject constructor(
             repository.deleteDrop(drop)
         }
     }
-
-    fun updateDropEmoji(drop: Drop, emoji: String) {
-        viewModelScope.launch {
-            repository.updateDrop(drop.copy(emoji = emoji))
-        }
-    }
 }
